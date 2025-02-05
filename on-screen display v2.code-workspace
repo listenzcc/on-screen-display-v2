@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "ui"
+		},
+		{
+			"path": "script"
+		},
+		{
+			"path": "doc"
+		}
+	],
+	"settings": {
+		"cSpell.words": [
+			"bezier",
+			"ndarray"
+		]
+	}
+}
