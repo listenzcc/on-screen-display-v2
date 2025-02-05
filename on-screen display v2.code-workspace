@@ -11,6 +11,9 @@
 		},
 		{
 			"path": "doc"
+		},
+		{
+			"path": "conf"
 		}
 	],
 	"settings": {

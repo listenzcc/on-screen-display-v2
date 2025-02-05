@@ -1,0 +1,8 @@
+upperScreen:
+  screenId: 1 # int: 0, 1, 2, ...
+  width: 800 # pixels
+  height: 600 # pixels
+  port: 18891
+
+UI:
+  port: 18890

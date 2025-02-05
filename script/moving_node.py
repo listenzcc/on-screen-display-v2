@@ -55,15 +55,18 @@ class MovingNode(NodeAppearance):
     # RLock
     _rlock = RLock()
 
-    def __init__(self, speed_unit: float, total_length: float, name: str = None):
+    def __init__(self, speed_unit: float):
         super().__init__()
         self.speed_unit = speed_unit
-        self.total_length = total_length
         logger.info(f'Initialized {self}')
 
     def go(self):
         '''Start the node moving.'''
         Thread(target=self._moving_loop, daemon=True).start()
+
+    def stop(self):
+        '''Stop the node from moving.'''
+        self.running = False
 
     @contextlib.contextmanager
     def lock(self):
@@ -100,6 +103,7 @@ class MovingNode(NodeAppearance):
                     ds = self.speed * self.speed_unit * dt
                     # Accumulate distance with ds
                     self.distance += ds
+            logger.debug(f'Node({self.name}) stops running.')
         except Exception as e:
             # Something went wrong.
             import traceback
