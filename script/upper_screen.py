@@ -19,10 +19,13 @@ Functions:
 # %% ---- 2025-02-05 ------------------------
 # Requirements and constants
 import sys
+import json
 import time
+import random
 import argparse
 import datetime
 import contextlib
+import socketserver
 
 from omegaconf import OmegaConf
 from PIL.ImageQt import ImageQt
@@ -62,10 +65,10 @@ pm.generate_road_map_image(CONFIG.upperScreen.width, CONFIG.upperScreen.height)
 moving_nodes_pool = dict()
 mn1 = MovingNode(pm.speed_unit)
 mn1.setup(5, (255, 255, 0, 255), 'mn1')
-mn1.set_speed(1)
+mn1.set_speed(1.3)
 mn2 = MovingNode(pm.speed_unit)
 mn2.setup(5, (255, 0, 0, 255), 'mn2')
-mn1.set_speed(2)
+mn2.set_speed(0.7)
 for mn in [mn1, mn2]:
     moving_nodes_pool[mn.name] = mn
     mn.go()
@@ -73,6 +76,142 @@ for mn in [mn1, mn2]:
 
 # %% ---- 2025-02-05 ------------------------
 # Function and class
+def random_rgba_color():
+    return tuple([random.randint(0, 256) for _ in range(3)] + [255])
+
+
+class SocketServer:
+    host = 'localhost'
+    port = CONFIG.upperScreen.port
+    encoding = 'utf-8'
+
+    def ok_message(self, message: str = 'OK message'):
+        return dict(status='OK', message=message)
+
+    def failed_message(self, message: str = 'Failed message'):
+        return dict(status='Failed', message=message)
+
+    def simple_message(self, message):
+        return json.dumps(message).encode(self.encoding)
+
+    def send_with_length(self, handler_self, message):
+        message = self.simple_message(message)
+        length = len(message).to_bytes(4, byteorder='big')
+        handler_self.request.sendall(length + message)
+
+    def receive_with_length(self, handler_self):
+        length = int.from_bytes(handler_self.request.recv(4), byteorder='big')
+        data = b""
+        while len(data) < length:
+            packet = handler_self.request.recv(4096)
+            if not packet:
+                break
+            data += packet
+        return json.loads(data.decode(self.encoding))
+
+    def start_socket_server(self):
+        class RequestHandler(socketserver.BaseRequestHandler):
+            def handle(handler_self):
+                message = self.receive_with_length(handler_self)
+                logger.debug(f"Received message: {message}")
+
+                # List the nodes info.
+                if message['command'] == 'list_nodes':
+                    nodes_info = [
+                        {
+                            'name': node.name,
+                            'color': node.color,
+                            'radius': node.radius,
+                            'speed': node.speed,
+                            'running': node.running,
+                            'distance': node.distance
+                        }
+                        for node in moving_nodes_pool.values()
+                    ]
+                    self.send_with_length(handler_self, nodes_info)
+
+                # Append new node.
+                elif message['command'] == 'append_node':
+                    # Find the available node name.
+                    for i in range(1, 1000000):
+                        name = f'mn{i}'
+                        if name not in moving_nodes_pool:
+                            break
+                    # Append the node.
+                    mn = MovingNode(pm.speed_unit)
+                    mn.setup(5, random_rgba_color(), name)
+                    s = random.uniform(0.5, 2.5)
+                    s = float(f'{s:0.1f}')
+                    mn.set_speed(s)
+                    moving_nodes_pool[name] = mn
+                    mn.go()
+                    self.send_with_length(
+                        handler_self, self.ok_message(f'Append {name}'))
+
+                # Toggle the running state of the node.
+                elif message['command'] == 'toggle_node_running_state':
+                    if mn := moving_nodes_pool.get(message.get('name')):
+                        if message['toggleToState']:
+                            mn.go()
+                        else:
+                            mn.stop()
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # Change node speed.
+                elif message['command'] == 'change_node_speed':
+                    if mn := moving_nodes_pool.get(message.get('name')):
+                        mn.set_speed(message['speed'])
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # Reset node distance to 0.
+                elif message['command'] == 'reset_node_distance':
+                    if mn := moving_nodes_pool.get(message.get('name')):
+                        mn.reset_distance()
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # Remove node.
+                elif message['command'] == 'remove_node':
+                    try:
+                        moving_nodes_pool.pop(message.get('name'))
+                    except KeyError:
+                        pass
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # Regenerate the map.
+                elif message['command'] == 'regenerate_map':
+                    # Set road randomly
+                    # pm.setup_road_randomly()
+
+                    # Set road from checkpoints
+                    print(message['checkpoints'])
+                    pm.setup_road(message['checkpoints'])
+
+                    pm.generate_road_map_image(
+                        CONFIG.upperScreen.width, CONFIG.upperScreen.height)
+
+                    for mn in moving_nodes_pool.values():
+                        mn.speed_unit = pm.speed_unit
+                        mn.reset_distance()
+                        logger.debug(f'Replace the node: {mn}')
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # ! Add new handler here.
+                elif message['command'] == 'update_node':
+                    node_name = message['name']
+                    if node_name in moving_nodes_pool:
+                        node = moving_nodes_pool[node_name]
+                        node.set_speed(message['speed'])
+                        node.set_color(tuple(message['color']))
+                        logger.debug(f"Updated node: {node_name}")
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # Don't know what to do.
+                else:
+                    self.send_with_length(handler_self, self.ok_message())
+
+        server = socketserver.TCPServer((self.host, self.port), RequestHandler)
+        Thread(target=server.serve_forever, daemon=True).start()
+        logger.info(f"Socket server started at {self.host}:{self.port}")
 
 
 class DefaultImage:
@@ -168,7 +307,7 @@ class OnScreenPainter(DefaultImage):
         while self.running:
             # Draw the nodes in the pool.
             img = None
-            for mn in moving_nodes_pool.values():
+            for mn in list(moving_nodes_pool.values()):
                 if img:
                     # Update existing img.
                     img = pm.draw_node_at_distance(
@@ -190,6 +329,11 @@ class OnScreenPainter(DefaultImage):
 # %% ---- 2025-02-05 ------------------------
 # Play ground
 if __name__ == '__main__':
+    # Start server.
+    ss = SocketServer()
+    ss.start_socket_server()
+
+    # Start on-screen painter.
     osp = OnScreenPainter()
     osp.window.show()
     osp.main_loop()

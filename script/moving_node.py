@@ -76,6 +76,9 @@ class MovingNode(NodeAppearance):
         finally:
             self._rlock.release()
 
+    def reset_distance(self):
+        self.distance = 0.0
+
     def _moving_loop(self):
         '''
         Start the moving loop.
@@ -88,7 +91,6 @@ class MovingNode(NodeAppearance):
         try:
             # Init.
             t0 = time.time()
-            self.distance = 0.0
             logger.info(f'Node({self.name}) starts moving.')
 
             # Iteration.

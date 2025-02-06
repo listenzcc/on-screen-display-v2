@@ -134,7 +134,7 @@ class PathMap:
         :return large_table: the dataframe with columns (_s, segment, distance, pos, progress, schedule_time)
         '''
         # Generate check_points and curves.
-        curves = mk_curve(check_points)
+        curves = mk_curve(np.array(check_points))
 
         # Calculate the time cost and length of each curve.
         # Generate segment_table: (idx, start, end, curve_length, curve_obj)
