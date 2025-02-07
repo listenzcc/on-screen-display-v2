@@ -39,6 +39,7 @@ from PyQt6.QtCore import Qt, QTimer
 from local_log import logger
 from path_map import PathMap
 from moving_node import MovingNode
+from bomb import Bomb
 
 
 # Parse arguments and generate CONFIG
@@ -61,6 +62,7 @@ pm = PathMap()
 pm.setup_road_randomly()
 pm.generate_road_map_image(CONFIG.upperScreen.width, CONFIG.upperScreen.height)
 
+
 # Moving nodes
 moving_nodes_pool = dict()
 mn1 = MovingNode(pm.speed_unit)
@@ -76,6 +78,46 @@ for mn in [mn1, mn2]:
 
 # %% ---- 2025-02-05 ------------------------
 # Function and class
+class RunningBombsPool:
+    pool = []
+    num: int = 0
+
+    @property
+    def size(self):
+        return len(self.pool)
+
+    def append(self, bomb: Bomb):
+        '''
+        Append a bomb to the pool.
+
+        :param bomb: the bomb to append.
+
+        :return: the appended bomb.
+        '''
+        # Only append the bomb if it is a bomb.
+        if isinstance(bomb, Bomb):
+            self.pool.append(bomb)
+            # logger.debug(f'Append bomb: {bomb}, {self.size}')
+        return bomb
+
+    def remove_expired_bombs(self):
+        '''
+        Remove expired bombs from the pool.
+
+        :return: the size of the pool.
+        '''
+        n = self.size
+        self.pool = [e for e in self.pool if not e.check_if_expired()]
+        m = self.size
+        # if m != n:
+        #     logger.debug(f'Pool size changed {n} -> {m}')
+        return m
+
+
+# Bombs
+rbp = RunningBombsPool()
+
+
 def random_rgba_color():
     return tuple([random.randint(0, 256) for _ in range(3)] + [255])
 
@@ -124,7 +166,9 @@ class SocketServer:
                             'radius': node.radius,
                             'speed': node.speed,
                             'running': node.running,
-                            'distance': node.distance
+                            'distance': node.distance,
+                            'displayBombThrowCircle': node.display_bomb_throw_circle,
+                            'lambda': node.lamb
                         }
                         for node in moving_nodes_pool.values()
                     ]
@@ -150,17 +194,45 @@ class SocketServer:
 
                 # Toggle the running state of the node.
                 elif message['command'] == 'toggle_node_running_state':
-                    if mn := moving_nodes_pool.get(message.get('name')):
+                    def do(mn):
                         if message['toggleToState']:
                             mn.go()
                         else:
                             mn.stop()
+                        return
+                    if message.get('name') == '*':
+                        for mn in moving_nodes_pool.values():
+                            do(mn)
+                    if mn := moving_nodes_pool.get(message.get('name')):
+                        do(mn)
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # Toggle the display state of the bomb throw circle
+                elif message['command'] == 'toggle_node_display_bomb_throw_circle':
+                    def do(mn):
+                        mn.display_bomb_throw_circle = message['flag']
+                    if message.get('name') == '*':
+                        for mn in moving_nodes_pool.values():
+                            do(mn)
+                    if mn := moving_nodes_pool.get(message.get('name')):
+                        do(mn)
                     self.send_with_length(handler_self, self.ok_message())
 
                 # Change node speed.
                 elif message['command'] == 'change_node_speed':
                     if mn := moving_nodes_pool.get(message.get('name')):
                         mn.set_speed(message['speed'])
+                    self.send_with_length(handler_self, self.ok_message())
+
+                # Change node lambda
+                elif message['command'] == 'change_node_lambda':
+                    def do(mn):
+                        mn.set_lambda(message['lambda'])
+                    if message.get('name') == '*':
+                        for mn in moving_nodes_pool.values():
+                            do(mn)
+                    if mn := moving_nodes_pool.get(message.get('name')):
+                        do(mn)
                     self.send_with_length(handler_self, self.ok_message())
 
                 # Reset node distance to 0.
@@ -251,6 +323,9 @@ class OnScreenPainter(DefaultImage):
     running = False
     key_pressed = ''
 
+    t0 = 0
+    frames = 0
+
     def __init__(self):
         super().__init__()
         self._prepare_window()
@@ -304,18 +379,36 @@ class OnScreenPainter(DefaultImage):
 
     def _main_loop(self):
         self.running = True
+        self.t0 = time.time()
+        t_report_interval = 1
+        t_report = self.t0 + t_report_interval
         while self.running:
-            # Draw the nodes in the pool.
+            # Report the frame rate at every t_report_gap seconds.
+            self.frames += 1
+            t = time.time()
+            if t > t_report:
+                t_report += t_report_interval
+                logger.info(
+                    f'Frame rate is {self.frames / (t - self.t0)}')
+
+            # Init the empty img.
             img = None
+
+            # Draw the nodes in the pool.
+            rbp.remove_expired_bombs()
             for mn in list(moving_nodes_pool.values()):
                 if img:
                     # Update existing img.
-                    img = pm.draw_node_at_distance(
-                        mn.distance, mn.radius, mn.color, img)
+                    img = pm.draw_node_at_distance(mn, img)
                 else:
                     # Create new img.
-                    img = pm.draw_node_at_distance(
-                        mn.distance, mn.radius, mn.color)
+                    img = pm.draw_node_at_distance(mn)
+                rbp.append(mn.throw_bomb())
+
+            # Draw the bombs.
+            if img:
+                for bomb in rbp.pool:
+                    img = bomb.draw(img)
 
             # If the img is still None, use the random image.
             if not img:

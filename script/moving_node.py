@@ -19,18 +19,21 @@ Functions:
 # %% ---- 2025-02-05 ------------------------
 # Requirements and constants
 import time
+import numpy as np
 import contextlib
 
+from bomb import Bomb
 from local_log import logger
 from threading import Thread, RLock
 
 
 # %% ---- 2025-02-05 ------------------------
 # Function and class
-class NodeAppearance(object):
-    radius = 3
-    color = (255, 0, 0, 255)
-    name = 'Node1'
+class NodeAppearance:
+    radius = 3  # pixels
+    color = (255, 0, 0, 255)  # RGBA color
+    name = 'Node1'  # node name, should be unique.
+    display_bomb_throw_circle = True
 
     def setup(self, radius: float = None, color: tuple = None, name: str = None):
         if name:
@@ -42,8 +45,75 @@ class NodeAppearance(object):
         logger.info(
             f'Setup the node: name:{self.name}, radius:{self.radius}, color:{self.color}')
 
+    def set_radius(self, radius: int):
+        with self.lock():
+            self.radius = radius
+        logger.info(f'Node({self.name}) radius set to {self.radius}')
 
-class MovingNode(NodeAppearance):
+    def set_color(self, color: tuple):
+        with self.lock():
+            self.color = color
+        logger.info(f'Node({self.name}) color set to {self.color}')
+
+
+class BombThrower:
+    bomb_throw_radius = 0.3  # radius for the bomb range.
+    # the factor controlling how often the bomb is thrown.
+    lamb = 3  # times per second
+    # when the bomb is thrown
+    t_throw: float = None  # seconds
+
+    def set_lambda(self, lamb: float):
+        with self.lock():
+            self.lamb = lamb
+        logger.info(f'Node({self.name}) lambda set to {self.lamb}')
+
+    def compute_next_t_throw(self, t: float = None):
+        '''
+        Compute the next time the bomb is thrown.
+        The dt follows the Poisson distribution with lambda = self.lamb.
+
+        :param t: the current time.
+
+        :return: the next time the bomb is thrown.
+        '''
+        if not t:
+            t = time.time()
+        u = np.random.uniform(1e-5, 1)
+        dt = -1/self.lamb * np.log(u)
+        self.t_throw = t + dt
+        return self.t_throw
+
+    def throw_bomb(self, t: float = None):
+        '''
+        Throw a bomb if it is ready, otherwise return None.
+
+        :param t: the current time.
+
+        :return: the bomb object if thrown, otherwise None.
+        '''
+        # No throws are allowed.
+        if self.t_throw is None:
+            return
+
+        if not t:
+            t = time.time()
+
+        # The bomb is awaiting.
+        if t < self.t_throw:
+            return
+
+        # Throw the bomb, and compute next throw time.
+        # logger.debug(f'Throwing bomb at t={t}')
+        self.t_throw = self.compute_next_t_throw(t)
+        x, y, r = self._position
+        u = np.random.uniform(0, 2*np.pi)
+        r = np.random.uniform(0, r)
+        position = (x + r * np.cos(u), y + r*np.sin(u))
+        return Bomb(color=self.color, name=self.name, position=position)
+
+
+class MovingNode(NodeAppearance, BombThrower):
     # Speed attributes
     speed = 1
     speed_limit = (0.1, 10)
@@ -51,6 +121,10 @@ class MovingNode(NodeAppearance):
     # Status
     running = False
     distance = 0.0
+
+    # Where the node is plotted in.
+    # It is changed only when the node is plotted.
+    _position = None
 
     # RLock
     _rlock = RLock()
@@ -88,6 +162,7 @@ class MovingNode(NodeAppearance):
             logger.error(f'Can not start moving, since it is already moving.')
 
         self.running = True
+        self.compute_next_t_throw()
         try:
             # Init.
             t0 = time.time()
@@ -122,16 +197,6 @@ class MovingNode(NodeAppearance):
             self.speed = max(self.speed_limit[0], min(
                 self.speed_limit[1], speed))
         logger.info(f'Node({self.name}) speed set to {self.speed}')
-
-    def set_radius(self, radius: int):
-        with self.lock():
-            self.radius = radius
-        logger.info(f'Node({self.name}) radius set to {self.radius}')
-
-    def set_color(self, color: tuple):
-        with self.lock():
-            self.color = color
-        logger.info(f'Node({self.name}) color set to {self.color}')
 
 
 # %% ---- 2025-02-05 ------------------------

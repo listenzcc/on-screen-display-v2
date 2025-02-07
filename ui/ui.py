@@ -80,11 +80,25 @@ class SocketClient:
             'toggleToState': toggleToState
         })
 
+    def toggle_node_display_bomb_throw_circle(self, name: str, flag: bool):
+        return self.send_message({
+            'command': 'toggle_node_display_bomb_throw_circle',
+            'name': name,
+            'flag': flag
+        })
+
     def change_node_speed(self, name: str, speed: float):
         return self.send_message({
             'command': 'change_node_speed',
             'name': name,
             'speed': speed
+        })
+
+    def change_node_lambda(self, name: str, lamb: float):
+        return self.send_message({
+            'command': 'change_node_lambda',
+            'name': name,
+            'lambda': lamb
         })
 
     def reset_node_distance(self, name: str):
@@ -134,7 +148,8 @@ def regenerate_map(content):
 class Rows:
     mapControl = ui.row()
     separator = ui.separator()
-    addNode = ui.row()
+    nodeControl = ui.row()
+    separator = ui.separator()
     nodeCard = ui.row()
 
 
@@ -147,32 +162,59 @@ with rows.mapControl:
 
     def randomize_checkpoints():
         row.clear()
+        # Randomly setup the checkpoints
         content['checkpoints'] = np.random.random((content['n'], 2)).tolist()
 
         def change_checkpoints(e):
-            content['checkpoints'] = e.content['json']['checkpoints']
+            '''
+            Update the checkpoints according to the json editor.
+
+            :param e: the json editor argument obj.
+            '''
+            content.update(e.content['json'])
 
         def reset_num_checkpoints(e):
-            print(e)
+            '''
+            Update the number of checkpoints according to the slider value.
+
+            :param e: the slider argument obj.
+            '''
             content['n'] = e.value
 
         with row:
             with ui.column():
-                ui.button('Regenerate Map',
-                          on_click=lambda e: regenerate_map(content),
-                          color='red')
+                ui.button('Regenerate Map', color='red',
+                          on_click=lambda e: regenerate_map(content))
                 ui.separator()
                 ui.button('Randomize Checkpoints',
                           on_click=randomize_checkpoints)
-                ui.slider(
-                    min=4, max=20, value=content['n'], on_change=reset_num_checkpoints).props('label-always')
+                ui.slider(min=4, max=20, value=content['n'],
+                          on_change=reset_num_checkpoints).props('label-always')
             ui.json_editor({'content': {'json': content}},
                            on_change=lambda e: change_checkpoints(e)).style('max-height: 24em; overflow: scroll')
+
+        return
     randomize_checkpoints()
 
 
-with rows.addNode:
-    ui.button('Append Node', on_click=append_node)
+with rows.nodeControl:
+    with ui.row():
+        with ui.card():
+            ui.button('Append Node', icon='rocket', on_click=append_node)
+            ui.button('Stop Nodes', color='orange', icon='stop',
+                      on_click=lambda e: socket_client.toggle_node_running_state('*', False))
+            ui.button('Start Nodes', color='green', icon='start',
+                      on_click=lambda e: socket_client.toggle_node_running_state('*', True))
+        ui.splitter()
+        with ui.card():
+            ui.switch(
+                'Display Bomb Throw Circles', value=True,
+                on_change=lambda e: socket_client.toggle_node_display_bomb_throw_circle('*', e.value))
+            ui.label('Lambda')
+            ui.slider(min=0.1, max=10, step=0.1, value=3).props('label-always').on(
+                'update:model-value',
+                lambda e: socket_client.change_node_lambda('*', e.args),
+                leading_events=False)
 
 
 def mk_card_for_node(node):
@@ -193,16 +235,31 @@ def mk_card_for_node(node):
             ui.item(f"Speed: {node['speed']:0.4f}")
             ui.item(f"Running: {node['running']}")
             ui.item(f"Distance: {node['distance']:0.4f}")
+            ui.item(
+                f"DisplayBombThrowCircle : {node['displayBombThrowCircle']}")
+            ui.item(f"Lambda: {node['lambda']}")
 
         ui.separator()
+        ui.label('Speed')
         ui.slider(min=0.1, max=10, value=node['speed']).props('label-always').on(
             'update:model-value',
             lambda e: socket_client.change_node_speed(name, e.args),
             leading_events=False)
 
+        ui.label('Lambda')
+        ui.slider(min=0.1, max=10, step=0.1, value=node['lambda']).props('label-always').on(
+            'update:model-value',
+            lambda e: socket_client.change_node_lambda(name, e.args),
+            leading_events=False)
+
         ui.switch(
             'Running', value=node['running'],
             on_change=lambda e: socket_client.toggle_node_running_state(name, e.value))
+
+        ui.switch(
+            'DisplayBombThrowCircle', value=node['displayBombThrowCircle'],
+            on_change=lambda e: socket_client.toggle_node_display_bomb_throw_circle(
+                name, e.value))
 
         with ui.row().classes('w-full'):
             ui.button('Restart',

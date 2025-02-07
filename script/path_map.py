@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 
 from local_log import logger
 from PIL import Image, ImageDraw
+from moving_node import MovingNode
 
 
 # %% ---- 2025-02-05 ------------------------
@@ -214,7 +215,7 @@ class PathMap:
 
         return fig
 
-    def generate_road_map_image(self, width: int, height: int, padding: int = 0):
+    def generate_road_map_image(self, width: int, height: int, padding: int = 0, alpha: int = 0):
         '''
         Generate the image with the given width, height and padding.
         The image content is the road map.
@@ -222,12 +223,13 @@ class PathMap:
         :param width: width of the image.
         :param height: height of the image.
         :param padding: padding of the image.
+        :param alpha: opacity of the image.
 
         :return: the PIL.Image object.
         '''
         # 1. Generate the PIL.Image as the size of (width + 2*padding, height + 2*padding), the mode is RGBA.
         image = Image.new('RGBA',
-                          (width + 2 * padding, height + 2 * padding), (255, 255, 255, 50))
+                          (width + 2 * padding, height + 2 * padding), (255, 255, 255, alpha))
         draw = ImageDraw.Draw(image)
 
         # 2. Draw the curves from the large_table's pos using a colormap
@@ -255,13 +257,11 @@ class PathMap:
         self.height = height
         return image
 
-    def draw_node_at_distance(self, distance: float, radius: int = 3, color=(255, 0, 0, 255), image: Image = None):
+    def draw_node_at_distance(self, mn: MovingNode, image: Image = None):
         '''
         Draw the node at the given distance, radius and color.
 
-        :param distance: the distance from the start.
-        :param radius: the radius of the node.
-        :param color: the color of the node.
+        :param mn: the moving node object.
         :param image: the image to draw, if None use self.road_map_image.copy() instead.
 
         :return: the updated image.
@@ -269,7 +269,17 @@ class PathMap:
         # Prepare the image and draw obj.
         if image is None:
             image = self.road_map_image.copy()
+        image_size_min = min(image.size)
         draw = ImageDraw.Draw(image)
+
+        # Parse the information from the mn
+        distance = mn.distance
+        radius = mn.radius
+        color = mn.color
+        bomb_throw_radius = mn.bomb_throw_radius
+
+        # Convert bomb_throw_radius into pixels
+        bomb_throw_radius *= image_size_min
 
         # Prevent the distance from exceeding the total_curve_length.
         distance %= self.total_curve_length
@@ -284,9 +294,19 @@ class PathMap:
         x = slice['pos'][0] * self.width + self.padding
         y = slice['pos'][1] * self.height + self.padding
 
-        # Draw the ellipse at the position.
+        # node body, draw the ellipse at the position.
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius), fill=color)
+
+        # bomb range, draw the ellipse at the position.
+        if mn.display_bomb_throw_circle:
+            draw.ellipse(
+                (x - bomb_throw_radius, y - bomb_throw_radius,
+                 x + bomb_throw_radius, y + bomb_throw_radius),
+                outline=color)
+
+        mn._position = (x, y, bomb_throw_radius)
+
         return image
 
 
