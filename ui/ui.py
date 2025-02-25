@@ -114,6 +114,7 @@ class SocketClient:
         })
 
     def regenerate_map(self, checkpoints: list):
+        print(checkpoints)
         return self.send_message({
             'command': 'regenerate_map',
             'checkpoints': checkpoints
@@ -221,8 +222,7 @@ def mk_card_for_node(node):
     name = node['name']
     with ui.card().style('width: 300px'):
         # Put the circle icon with the node['color'] filled on the top right corner of the card.
-        color = f"rgba({node['color'][0]}, {node['color'][1]}, {
-            node['color'][2]}, {node['color'][3] / 255})"
+        color = f"rgba({node['color'][0]}, {node['color'][1]}, {node['color'][2]}, {node['color'][3] / 255})"
         with ui.row().classes('w-full'):
             ui.space()
             ui.label(f"Name: {node['name']}").style('font-weight: bold;')

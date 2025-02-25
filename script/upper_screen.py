@@ -380,7 +380,7 @@ class OnScreenPainter(DefaultImage):
     def _main_loop(self):
         self.running = True
         self.t0 = time.time()
-        t_report_interval = 1
+        t_report_interval = 10  # Seconds
         t_report = self.t0 + t_report_interval
         while self.running:
             # Report the frame rate at every t_report_gap seconds.

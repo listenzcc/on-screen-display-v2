@@ -41,6 +41,31 @@ def random_check_points(n: int):
     return check_points
 
 
+def extend_check_points(check_points: np.ndarray, length_threshold: float = 0.2, tail_length: float = 0.1):
+    '''
+    Extend the check points with the threshold.
+
+    :param check_points: the check points.
+    :param threshold: the threshold to extend.
+    :return: the extended check points.
+    '''
+    n = len(check_points)
+    extended_check_points = []
+    for i in range(n-1):
+        p1 = check_points[i]
+        p2 = check_points[i+1]
+        length = np.linalg.norm(p1 - p2)
+        if length > length_threshold:
+            r = tail_length / length
+            extended_check_points.append(p1)
+            extended_check_points.append(p1*(1-r) + p2*r)
+            extended_check_points.append(p2*(1-r) + p1*r)
+        else:
+            extended_check_points.append(p1)
+    extended_check_points.append(p2)
+    return np.array(extended_check_points)
+
+
 def mk_curve(check_points: np.ndarray):
     '''
     Create the bezier curve from a list of points.
@@ -58,9 +83,10 @@ def mk_curve(check_points: np.ndarray):
         a = check_points[i-1]
         b = check_points[i]
         c = check_points[i+1]
+        length = np.linalg.norm(a-c)
         control_points[i] = dict(
-            left=b+(a-c)*0.5,
-            right=b-(a-c)*0.5
+            left=b+(a-c)*0.05/length,
+            right=b-(a-c)*0.05/length
         )
     curves = []
     for i in range(1, n):
@@ -135,7 +161,9 @@ class PathMap:
         :return large_table: the dataframe with columns (_s, segment, distance, pos, progress, schedule_time)
         '''
         # Generate check_points and curves.
-        curves = mk_curve(np.array(check_points))
+        check_points = np.array(check_points)
+        check_points = extend_check_points(check_points)
+        curves = mk_curve(check_points)
 
         # Calculate the time cost and length of each curve.
         # Generate segment_table: (idx, start, end, curve_length, curve_obj)
@@ -240,7 +268,7 @@ class PathMap:
             points = curve.evaluate_multi(np.linspace(0, 1, 1000)).T
             scaled_points = [(x * width + padding, y * height + padding)
                              for x, y in points]
-            draw.line(scaled_points, fill=color, width=2)
+            draw.line(scaled_points, fill=color, width=5)
 
         # Draw the linear interpolation between check points
         for i in range(len(self.check_points) - 1):
@@ -248,7 +276,7 @@ class PathMap:
             p2 = self.check_points[i + 1]
             x1, y1 = p1[0] * width + padding, p1[1] * height + padding
             x2, y2 = p2[0] * width + padding, p2[1] * height + padding
-            draw.line([(x1, y1), (x2, y2)], fill=(128, 128, 128, 255), width=1)
+            draw.line([(x1, y1), (x2, y2)], fill=(128, 128, 128, 255), width=3)
 
         # 3. Return the image
         self.road_map_image = image
@@ -319,6 +347,7 @@ if __name__ == '__main__':
     print(pm.large_table)
     pm.plot_with_matplotlib()
     plt.plot()
+    plt.show()
 
 
 # %% ---- 2025-02-05 ------------------------
