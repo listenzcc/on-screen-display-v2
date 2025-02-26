@@ -24,12 +24,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from local_log import logger
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 from moving_node import MovingNode
 
+# %%
+# Make the plane icon image, the black background is transparent.
+plane_icon = Image.open(
+    './img/plane-icon.png').resize((50, 50)).convert('RGBA')
+# mask = ImageOps.invert(plane_icon.convert('L'))
+mask = plane_icon.convert('L')
+plane_icon.putalpha(mask)
 
 # %% ---- 2025-02-05 ------------------------
 # Function and class
+
+
 def random_check_points(n: int):
     '''
     Create the random check points.
@@ -41,7 +50,7 @@ def random_check_points(n: int):
     return check_points
 
 
-def extend_check_points(check_points: np.ndarray, length_threshold: float = 0.2, tail_length: float = 0.1):
+def extend_check_points(check_points: np.ndarray, length_threshold: float = 0.3, tail_length: float = 0.1):
     '''
     Extend the check points with the threshold.
 
@@ -189,7 +198,7 @@ class PathMap:
         # 2. Make the large table.
         large_table = []
         for i, slice in segment_table.iterrows():
-            s = np.linspace(0, 1, slice['n'])
+            s = np.linspace(0, 1, slice['n'], endpoint=False)
             distance = np.linspace(slice['distance_offset'],
                                    slice['distance_offset'] + slice['length'], slice['n'])
             df = pd.DataFrame(s, columns=['_s'])
@@ -268,7 +277,7 @@ class PathMap:
             points = curve.evaluate_multi(np.linspace(0, 1, 1000)).T
             scaled_points = [(x * width + padding, y * height + padding)
                              for x, y in points]
-            draw.line(scaled_points, fill=color, width=5)
+            draw.line(scaled_points, fill=color, width=2)
 
         # Draw the linear interpolation between check points
         for i in range(len(self.check_points) - 1):
@@ -276,10 +285,11 @@ class PathMap:
             p2 = self.check_points[i + 1]
             x1, y1 = p1[0] * width + padding, p1[1] * height + padding
             x2, y2 = p2[0] * width + padding, p2[1] * height + padding
-            draw.line([(x1, y1), (x2, y2)], fill=(128, 128, 128, 255), width=3)
+            draw.line([(x1, y1), (x2, y2)], fill=(128, 128, 128, 255), width=1)
 
         # 3. Return the image
         self.road_map_image = image
+        self.road_map_image_draw = ImageDraw.Draw(image)
         self.padding = padding
         self.width = width
         self.height = height
@@ -301,16 +311,18 @@ class PathMap:
         draw = ImageDraw.Draw(image)
 
         # Parse the information from the mn
-        distance = mn.distance
-        radius = mn.radius
-        color = mn.color
-        bomb_throw_radius = mn.bomb_throw_radius
+        with mn.lock():
+            # Prevent the distance from exceeding the total_curve_length.
+            distance = mn.distance % self.total_curve_length
+            radius = mn.radius
+            color = mn.color
+            bomb_throw_radius = mn.bomb_throw_radius
+            _n = mn.distance_queue.qsize()
+            distance_array = [mn.distance_queue.get() % self.total_curve_length
+                              for i in range(_n-1)] + [distance]
 
         # Convert bomb_throw_radius into pixels
         bomb_throw_radius *= image_size_min
-
-        # Prevent the distance from exceeding the total_curve_length.
-        distance %= self.total_curve_length
 
         # Acquire the slice with the largest distance less than the given distance.
         # If failed, return the first slice.
@@ -321,10 +333,42 @@ class PathMap:
             slice = self.large_table.iloc[0]
         x = slice['pos'][0] * self.width + self.padding
         y = slice['pos'][1] * self.height + self.padding
-
         # node body, draw the ellipse at the position.
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius), fill=color)
+
+        # Draw the has-been-traveled road and the aircraft.
+        try:
+            d1 = distance_array[0]
+            d2 = distance_array[-1]
+            slice1 = self.large_table.query(f'distance<{d1}').iloc[-1]
+            slice2 = self.large_table.query(f'distance<{d2}').iloc[-1]
+            a = slice1.name
+            b = slice2.name
+            if a == b:
+                a -= 1
+            for i in range(a-1, b-1):
+                x1 = self.large_table.loc[i,
+                                          'pos'][0] * self.width + self.padding
+                y1 = self.large_table.loc[i,
+                                          'pos'][1] * self.height + self.padding
+
+                x2 = self.large_table.loc[i+1,
+                                          'pos'][0] * self.width + self.padding
+                y2 = self.large_table.loc[i+1,
+                                          'pos'][1] * self.height + self.padding
+
+                self.road_map_image_draw.line(
+                    [(x1, y1), (x2, y2)], fill=color, width=5)
+
+            psi = np.arctan2(x2-x1, y2-y1)
+            if mn.name == 'mn2':
+                print(psi, x2-x1, y2-y1, a, b)
+            icon = plane_icon.rotate(180+psi/np.pi*180)
+            image.paste(
+                icon, (int(x-icon.size[0]/2), int(y-icon.size[1]/2)), icon)
+        except Exception:
+            pass
 
         # bomb range, draw the ellipse at the position.
         if mn.display_bomb_throw_circle:

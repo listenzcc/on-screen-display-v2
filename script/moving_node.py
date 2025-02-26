@@ -23,6 +23,7 @@ import numpy as np
 import contextlib
 
 from bomb import Bomb
+from queue import Queue
 from local_log import logger
 from threading import Thread, RLock
 
@@ -120,7 +121,8 @@ class MovingNode(NodeAppearance, BombThrower):
 
     # Status
     running = False
-    distance = 0.0
+    distance = 0.0  # The distance of the node has arrived.
+    distance_queue = None  # The queue of the distance.
 
     # Where the node is plotted in.
     # It is changed only when the node is plotted.
@@ -132,6 +134,7 @@ class MovingNode(NodeAppearance, BombThrower):
     def __init__(self, speed_unit: float):
         super().__init__()
         self.speed_unit = speed_unit
+        self.distance_queue = Queue()
         logger.info(f'Initialized {self}')
 
     def go(self):
@@ -180,6 +183,7 @@ class MovingNode(NodeAppearance, BombThrower):
                     ds = self.speed * self.speed_unit * dt
                     # Accumulate distance with ds
                     self.distance += ds
+                    self.distance_queue.put(self.distance)
             logger.debug(f'Node({self.name}) stops running.')
         except Exception as e:
             # Something went wrong.
